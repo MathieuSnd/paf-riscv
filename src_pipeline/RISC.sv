@@ -1,7 +1,7 @@
 module RISC #(
-        localparam NRET = 1,
-        localparam ILEN = 32,
-        localparam XLEN = 32
+        parameter NRET = 1,
+        parameter ILEN = 32,
+        parameter XLEN = 32
     ) (
     input logic            clk,
     input logic            reset_n,
