@@ -139,7 +139,7 @@ module EX(
             begin
                 res = (Op1 + Op2) & ~32'b01;
                 trap = res[1:0] != 0;
-                    
+
             end
         else if(opcode_EX == JAL) begin
             res  = imm;

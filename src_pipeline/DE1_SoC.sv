@@ -68,6 +68,11 @@
       );
 
 
+
+   // @todo add write strobe support to ram.sv 
+   wire [3:0] ram_wstrb;
+
+
    // Instanciation du processeur
    RISC risc
      (
@@ -78,9 +83,31 @@
       .d_data_write   ( ram_wdata       ),
       .d_write_enable ( ram_we          ),
       .d_data_valid   ( ram_rdata_valid ),
+      .d_data_wstrb   ( ram_wstrb       ),
       .i_address      ( rom_addr        ),
       .i_data_read    ( rom_rdata       ),
       .i_data_valid   ( rom_rdata_valid )
       );
+
+
+  // set outputs in function of the processor state
+  // so that quartus does not optimize the whole 
+  // system out
+    always@(posedge clock_50 or negedge reset_n)
+      if(!reset_n)
+        ledr <= '0;
+      else begin
+        ledr[0] <= ^ram_addr;
+        ledr[1] <= ^ram_rdata;
+        ledr[2] <= ^ram_wdata;
+        ledr[3] <= ram_we;
+        ledr[4] <= ram_rdata_valid;
+        ledr[5] <= ^ram_wstrb;
+        ledr[6] <= ^rom_addr;
+        ledr[7] <= ^rom_rdata;
+        ledr[8] <= rom_rdata_valid;
+
+        hex0 = {1'b0, ram_wstrb};
+      end
 
 endmodule
