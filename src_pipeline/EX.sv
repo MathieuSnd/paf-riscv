@@ -13,6 +13,8 @@ module EX(
           input logic[31:0] PC,
           input logic[4:0] rd_MEM, // used for data forwarding
           input logic[31:0] res_MEM,
+          input      [ 1:0] ldsz,
+          output     [ 1:0] ldshift,
           output logic[31:0] res,
           output logic[31:0] x2_EX,
           output logic       trap
@@ -99,6 +101,9 @@ module EX(
     `include "BRCTYPE.vh"
     `include "ALUTYPE.vh"
 
+
+    wire [31:0] sum = Op1 + Op2;
+
     always @(*) begin
         trap = 0;
         //Register Compare
@@ -110,7 +115,7 @@ module EX(
                     op_EX == BLTU && Op1 < Op2 ||
                     op_EX == BGEU && Op1 >= Op2) ? 1 : 0;
 
-            trap = (imm[1:0] != 0) && res;
+            trap = (imm[1:0] != 0) && (res != 0);
         end
         //ALU
         else if (opcode_EX == IMM_OP || opcode_EX == REG_OP)
@@ -129,12 +134,17 @@ module EX(
                 endcase
             end
         else if(opcode_EX == AUIPC)
-            res = Op1 + Op2;
-        else if (opcode_EX == LOAD || opcode_EX == STORE || opcode_EX == LUI)
-            begin
-                res  = Op1 + Op2;
-                trap = res[1:0] != 0;
-            end
+            res = sum;
+        else if (opcode_EX == LUI) begin
+            res  = sum;
+            trap = res[1:0] != 0;
+        end
+        else if(opcode_EX == LOAD || opcode_EX == STORE) begin
+            res = sum & ~32'b11;
+
+            trap = (ldsz == 2'b01) && (sum[0:0] != 0)  // LH
+                || (ldsz == 2'b11) && (sum[1:0] != 0); // LW
+        end
         else if(opcode_EX == JALR)
             begin
                 res = (Op1 + Op2) & ~32'b01;
@@ -150,6 +160,7 @@ module EX(
     end
 
 
-        
+   
+    assign ldshift = sum[1:0];
         
 endmodule

@@ -23,6 +23,14 @@ module ID   (
     output logic[6:0] opcode,
     output logic[3:0] op,
 
+    // 0: undefined
+    // 1: load byte
+    // 2: load half
+    // 3: load word
+    output [1:0] ldsz,
+    output       ldsx,
+
+
     // invalid instruction
     output logic      ill
 );
@@ -75,6 +83,20 @@ module ID   (
     //static position, we prefer to differentiate the
     //3 operations having a 1 as funct7.
     //THERE IS NO DEFAULT OP.
+
+
+    always_comb begin
+        case(func3)
+            3'b 000: /* LB  / SB  */ {ldsx,ldsz} = 3'b1_00;
+            3'b 001: /* LH  / SH  */ {ldsx,ldsz} = 3'b1_01;
+            3'b 010: /* LW  / SW  */ {ldsx,ldsz} = 3'b0_11;
+            3'b 100: /* LBU       */ {ldsx,ldsz} = 3'b0_00;
+            3'b 101: /* LHU       */ {ldsx,ldsz} = 3'b0_01;
+            default: {ldsx,ldsz} = 3'b0_00;
+        endcase
+    end
+
+
     always @(*)
         if ((opcode == IMM_OP && 
              (instr[14:12] == 3'b101)) ||

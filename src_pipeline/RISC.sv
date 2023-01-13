@@ -10,6 +10,7 @@ module RISC #(
     output logic [31:0] d_address,
     input logic [31:0]  d_data_read,
     output logic [31:0] d_data_write,
+    output logic [ 3:0] d_data_wstrb,
     output logic        d_write_enable,
     input logic         d_data_valid,
     
@@ -119,26 +120,56 @@ localparam REG_OP   = 7'b0110011;
     logic[3:0] op_EX;
 
 
+    // LW, LH, LB signals
+    wire [1:0] ldsz_ID;
+    wire       ldsx_ID;
+
+    wire  [1:0] ldshift_EX;
+    logic [1:0] ldsz_EX;
+    logic       ldsx_EX;
+
+    logic [1:0] ldshift_MEM;
+    logic [1:0] ldsz_MEM;
+    logic       ldsx_MEM;
+
+    logic [1:0] ldshift_WB;
+    logic [1:0] ldsz_WB;
+    logic       ldsx_WB;
+    
+
+
+
     always @(posedge clk) begin
         if(!reset_n) begin
             PC_ID  <= '0;
             {ill_EX, opcode_EX, PC_EX,  rd_EX}  <= '0;
             {opcode_MEM, PC_MEM, rd_MEM} <= '0;
             {opcode_WB, PC_WB,  rd_WB}  <= '0;
+            {ldsz_EX, ldsx_EX}     <= '0;
+            {ldshift_MEM, ldsz_MEM, ldsx_MEM}  <= '0;
+            {ldshift_WB, ldsz_WB, ldsx_WB}     <= '0;
+
         end else begin
             if(!ex_stall) begin
                 PC_ID <= PC_IF;
 
+
+                {ldsz_EX, ldsx_EX}     <= {ldsz_ID, ldsx_ID};
+
                 if(kill_to_EX)
                     {ill_EX, opcode_EX, op_EX, PC_EX, rd_EX}  <= '0;
                 else
-                    {ill_EX, opcode_EX, op_EX, PC_EX, rd_EX} <= {ill_ID, opcode_ID, op_ID, PC_ID, rd_ID};
+                    {ill_EX, opcode_EX, op_EX, PC_EX, rd_EX} 
+                 <= {ill_ID, opcode_ID, op_ID, PC_ID, rd_ID};
 
                 {opcode_MEM, PC_MEM, rd_MEM} <= {opcode_EX, PC_EX,  rd_EX};
             end
-            //{opcode_MEM, PC_MEM, rd_MEM} <= {opcode_EX, PC_EX,  rd_EX};
             else
                 {opcode_MEM, PC_MEM, rd_MEM} <= '0;
+
+
+            {ldshift_MEM, ldsz_MEM, ldsx_MEM}  <= {ldshift_EX, ldsz_EX, ldsx_EX};
+            {ldshift_WB, ldsz_WB, ldsx_WB}     <= {ldshift_MEM, ldsz_MEM, ldsx_MEM};
 
             {opcode_WB, PC_WB,  rd_WB}  <= {opcode_MEM, PC_MEM, rd_MEM};
         end
@@ -199,6 +230,11 @@ localparam REG_OP   = 7'b0110011;
             res_WB  <= res_MEM;
         end
     end
+
+
+    wire [3:0] store_mask= {ldsz_MEM[1], ldsz_MEM[1], ldsz_MEM[0], 1'b1};
+
+    assign d_data_wstrb = (opcode_MEM == STORE) ? store_mask << ldshift_MEM : 0;
 
 
     wire [31:0] jump_addr_EX;
@@ -263,6 +299,8 @@ localparam REG_OP   = 7'b0110011;
             .imm(imm_ID),
             .opcode(opcode_ID),
             .op(op_ID),
+            .ldsz(ldsz_ID), 
+            .ldsx(ldsx_ID),
             .ill(ill_ID)
     );
 
@@ -283,6 +321,8 @@ localparam REG_OP   = 7'b0110011;
             .op_EX(op_EX),
             .opcode_EX(opcode_EX),
             .PC(PC_EX),
+            .ldsz(ldsz_EX), 
+            .ldshift(ldshift_EX),
 
             .res(res_EX),
             .x2_EX(x2_EX),
@@ -296,23 +336,29 @@ localparam REG_OP   = 7'b0110011;
             .x2(x2_MEM),
             .res(res_MEM),
             .opcode(opcode_MEM),
-            
+            .load_shift(ldshift_MEM),
+
             .d_data_write(d_data_write),
+
             .d_address(d_address),
             .d_write_enable(d_write_enable)
     );
 
 
-    //The WB module is mostly a multiplexer for knowing what to 
-    //write in rd.
+    //The WB module is mostly a multiplexer to select xd
+    // with a shifter for unaligned byte/half word access
     WB WB_module    (
             .d_data_read(d_data_read),
             .res(res_WB),
             .PC(PC_WB),
             .opcode(opcode_WB),
+            .load_shift(ldshift_WB),
+            .load_size(ldsz_WB),
+            .load_sign_extend(ldsx_WB),
 
             .xd(xd_WB)
     );
+
 
 
 `ifdef RVFI_TRACE
@@ -355,7 +401,6 @@ localparam REG_OP   = 7'b0110011;
     logic        valid_q, valid_q2;
     logic        trap_q;
     logic [31:0] mem_addr_q;
-    logic [3:0]  mem_rmask_q;
     logic [3:0]  mem_wmask_q;
     logic [31:0] mem_wdata_q;
     logic [31:0] pc_wdata_q;
@@ -373,7 +418,6 @@ localparam REG_OP   = 7'b0110011;
     logic [4:0]  rd_q;
     logic [31:0] res_q;
 
-    logic        valid_q2;
     logic        trap_q2;
     logic [31:0] pc_wdata_q2;
     logic [31:0] rs1_rdata_q2;
@@ -389,12 +433,15 @@ localparam REG_OP   = 7'b0110011;
     logic [31:0] pc_EX_q;
     logic [31:0] pc_EX_q2;
 
+
+    wire [3:0] load_mask = {ldsz_WB[1], ldsz_WB[1], ldsz_WB[0], 1'b1};
+    wire [3:0] mem_rmask = (opcode_WB == LOAD) ? load_mask << ldshift_WB : 0;
+
     always_ff @(posedge clk) begin
         if(!reset_n) begin
             valid_q     <= '0;
             trap_q      <= '0;
             mem_addr_q  <= '0;
-            mem_rmask_q <= '0;
             mem_wmask_q <= '0;
             mem_wdata_q <= '0;
             pc_wdata_q  <= '0;
@@ -442,8 +489,7 @@ localparam REG_OP   = 7'b0110011;
             valid_q     <= ins_valid;
             trap_q      <= ins_trap;
             mem_addr_q  <= d_address;
-            mem_rmask_q <= (opcode_MEM == LOAD) ? 4'hf : 4'h0;
-            mem_wmask_q <= (opcode_MEM == STORE)  ? 4'hf : 4'h0;
+            mem_wmask_q <= d_data_wstrb;
             mem_wdata_q <= d_data_write;
             pc_wdata_q  <= pc_wdata;
             rs1_rdata_q <= rs1_value_EX;
@@ -465,9 +511,7 @@ localparam REG_OP   = 7'b0110011;
         end
     end
 
-    wire [31:0] rd_wdata = (opcode_EX_q2 == LOAD) ? (d_data_read)
-                  : (opcode_EX_q2 == JAL || opcode_EX_q2 == JALR) ? (PC_WB + 32'h4)
-                  : res_q2;
+    wire [31:0] rd_wdata = xd_WB;
 
     assign rvfi_valid     = valid_q2;
     assign rvfi_order     = ins_order_q;
@@ -482,7 +526,7 @@ localparam REG_OP   = 7'b0110011;
     
     assign rvfi_rd_addr   = (opcode_EX_q2 == BRANCH || opcode_EX_q2 == STORE) ? 0 : rd_q2;
     assign rvfi_mem_addr  = mem_addr_q;
-    assign rvfi_mem_rmask = mem_rmask_q;
+    assign rvfi_mem_rmask = mem_rmask;
     assign rvfi_mem_wmask = mem_wmask_q; 
     assign rvfi_mem_rdata = d_data_read;
     assign rvfi_mem_wdata = mem_wdata_q;
